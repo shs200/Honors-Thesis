@@ -1,0 +1,148 @@
+---
+title: "Honors Thesis"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE)
+library(tidyverse)
+library("pastecs")
+library("qgraph")
+library("mgm")
+library("bootnet")
+library("NetworkComparisonTest")
+library("pastecs")
+library("coin") 
+library("ggplot2")
+library("lavaan")
+library("rockchalk")
+library("mediation")
+library("gvlma")
+library(gridExtra)
+library(readxl)    
+read_excel_allsheets <- function(filename, tibble = FALSE) {
+    # I prefer straight data.frames
+    # but if you like tidyverse tibbles (the default with read_excel)
+    # then just pass tibble = TRUE
+    sheets <- readxl::excel_sheets(filename)
+    x <- lapply(sheets, function(X) readxl::read_excel(filename, sheet = X))
+    if(!tibble) x <- lapply(x, as.data.frame)
+    names(x) <- sheets
+    x
+}
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+```{r import data}
+#Import data
+data <- read_excel_allsheets("Honors data.xlsx")
+
+```
+```{r correlation}
+cor.matrix <- round(cor(data$`PTSD Severe`,use = "pairwise.complete.obs"),2)
+view(cor.matrix)
+cor.matrix2 <- round(cor(data$`PTSD moderate`,use = "pairwise.complete.obs"),2)
+cor.matrix3 <- round(cor(data$`PTSD mild`,use = "pairwise.complete.obs"),2)
+```
+```{r graph}
+Graph_pcor <- qgraph(cor.matrix, graph = "pcor", layout = "spring", threshold = "bonferroni", sampleSize = nrow (data$`PTSD Severe`),alpha = 0.05)
+Graph_pcor2 <- qgraph(cor.matrix2, graph = "pcor", layout = "spring", threshold = "bonferroni",  sampleSize = nrow (data$`PTSD moderate`),alpha = 0.05)
+Graph_pcor3 <- qgraph(cor.matrix3, graph = "pcor", layout = "spring", threshold = "bonferroni",  sampleSize = nrow (data$`PTSD mild`),alpha = 0.05)
+
+Graph_lasso <- qgraph(cor.matrix, graph = "glasso", layout = "spring", tuning = 0.25,
+                     sampleSize = nrow(data$`PTSD Severe`))
+Graph_lasso2 <- qgraph(cor.matrix2, graph = "glasso", layout = "spring", tuning = 0.25,
+                     sampleSize = nrow(data$`PTSD moderate`))
+Graph_lasso3 <- qgraph(cor.matrix3, graph = "glasso", layout = "spring", tuning = 0.25,
+                     sampleSize = nrow(data$`PTSD mild`))
+
+
+Layout <- averageLayout(Graph_lasso,Graph_lasso2,Graph_lasso3)
+layout(t(1:3))
+qgraph(cor.matrix, graph = "glasso", layout = Layout, tuning = 0.25,
+                     sampleSize = nrow(data$`PTSD Severe`), minimum = 0,
+                      cut = 0.15, maximum = 1, details = TRUE,
+                      esize = 20, title = "PTSD Severe")
+
+qgraph(cor.matrix2, graph = "glasso", layout = Layout, tuning = 0.25,
+                     sampleSize = nrow(data$`PTSD moderate`), minimum = 0,
+                      cut = 0.15, maximum = 1, details = TRUE,
+                      esize = 20, title = "PTSD Moderate")
+qgraph(cor.matrix3, graph = "glasso", layout = Layout, tuning = 0.25,
+                     sampleSize = nrow(data$`PTSD mild`), minimum = 0,
+                      cut = 0.15, maximum = 1, details = TRUE,
+                      esize = 20, title = "PTSD Mild")
+centRes <- centrality(Graph_lasso)
+centRes$Closeness
+centRes$Betweenness
+centralityPlot(Severe = Graph_lasso, Moderate = Graph_lasso2, Mild = Graph_lasso3, include = c("Strength","Closeness","Betweenness"))
+
+## compare two networks
+adjmat1 <- getWmat(Graph_lasso)
+cor1 <- adjmat1[upper.tri(adjmat1,diag=FALSE)]
+adjmat2 <- getWmat(Graph_lasso2)
+cor2 <- adjmat2[upper.tri(adjmat2,diag=FALSE)]
+adjmat3 <- getWmat(Graph_lasso3)
+cor3 <- adjmat3[upper.tri(adjmat3,diag=FALSE)]
+cor_pears <- cor(cor1,cor2,  method = "pearson") ## r = 0.899, severe and moderate, highly correlated
+cor_pears2 <- cor(cor1,cor3,  method = "pearson") ## r = 0.829, severe and mild
+cor_pears3 <- cor(cor2,cor3,  method = "pearson") ## r = 0.823
+
+```
+
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r NCT Test}
+NCT_cor_auto <- function(data1, 
+                         data2, 
+                         gamma = 0.5, 
+                         it = 100, 
+                         paired=FALSE, 
+                         weighted=TRUE, 
+                         test.edges=FALSE, 
+                         edges, 
+                         progressbar=TRUE,
+                         make.positive.definite=TRUE,
+                         p.adjust.methods="none",
+                         verbose = TRUE
+){ 
+  if (verbose) message("Note: polychoric correlations input has not been validated.")
+  
+  # Dit is nu een simpele wrapper om NCT:
+  NCT(
+    data1 = data1,
+    data2 = data2,
+    gamma = gamma,
+    it = it,
+    binary.data = FALSE,
+    paired = paired,
+    weighted = weighted,
+    test.edges = test.edges,
+    edges = edges,
+    progressbar = progressbar,
+    make.positive.definite = make.positive.definite,
+    p.adjust.methods = p.adjust.methods,
+    estimator = NCT_estimator_GGM,
+    estimatorArgs = list(gamma = gamma, make.positive.definite = make.positive.definite, corMethod = "cor_auto"),
+    verbose = verbose
+  )
+
+Severe_vs_Moderate <- NCT_cor_auto(data$`PTSD Severe`, data$`PTSD moderate`, it=5000, binary.data = FALSE, paired = FALSE, weighted=TRUE, test.edges = TRUE,
+                           edges = list(c(1,2),c(1,3),c(1,4),c(1,5),c(1,6),c(1,7),c(1,8),c(1,9),c(1,10),c(1,11),c(1,12),c(1,13),c(1,14),c(1,15),c(1,16),c(1,17),c(2,3),c(2,4),c(2,5),c(2,6),c(2,7),c(2,8), c(2,9),c(2,10),c(2,11),c(2,12),c(2,13),c(2,14),c(2,15),c(2,16),c(2,17),c(3,4),c(3,5),c(3,6),c(3,7),c(3,8),c(3,9),c(3,10),c(3,11),c(3,12),c(3,13),c(3,14),c(3,15),c(3,16),c(3,17),c(4,5),c(4,6),c(4,7),c(4,8),c(4,9),c(4,10),c(4,11),c(4,12),c(4,13),c(4,14),c(4,15),c(4,16),c(4,17),            c(5,6),c(5,7),c(5,8),c(5,9),c(5,10),c(5,11),c51,12),c(5,13),c(5,14),c(5,15),c(5,16),c(5,17),c(6,7),c(6,8),c(6,9),c(6,10),c(6,11),c(6,12),c(6,13),c(6,14),c(6,15),c(6,16),c(6,17),c(7,8),c(7,9),c(7,10),c(7,11),c(7,12),c(7,13),c(7,14),c(7,15),c(7,16),c(7,17),c(8,9),c(8,10),c(8,11),c(8,12),c(8,13),c(8,14),c(8,15),c(8,16),c(8,17),c(9,10),c(9,11),c(9,12),c(9,13),c(9,14),c(9,15),c(9,16),c(9,17),c(10,11),c(10,12),c(10,13),c(10,14),c(10,15),c(10,16),c(10,17),c(11,12),c(11,13),c(11,14),c(11,15),c(11,16),c(11,17),c(12,13),c(12,14),c(12,15),c(12,16),c(12,17),c(13,14),c(13,15),c(13,16),c(13,17),c(14,15),c(14,16),c(14,17),c(15,16),c(15,17),c(16,17),progressbar=TRUE)
+
+summary(Severe_vs_Moderate)
+plot(Severe_vs_Moderate, what="network")
+plot(Severe_vs_Moderate, what="strength")
+plot(Severe_vs_Moderate, what="edge")
+
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
